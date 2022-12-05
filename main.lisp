@@ -7,7 +7,7 @@
 (in-package #:tech.corder.aoc2022)
 
 (defun read-input-file (filename)
-  (with-open-file (file filename)
+  (with-open-file (file (concatenate 'string "input/" filename))
     (loop for line = (read-line file nil)
           while line
           collect line)))
@@ -50,9 +50,10 @@
                   (cdr (assoc result result-scores))))
              (xyz->rps (xyz) (case xyz (x 'rock) (y 'paper) (z 'scissors)))
              (part1 ()
-               (let ((rounds (mapcar (lambda (round)
-                                       (cons (car round) (xyz->rps (cdr round))))
-                                     rounds)))
+               (let ((rounds (mapcar
+                              (lambda (round)
+                                (cons (car round) (xyz->rps (cdr round))))
+                              rounds)))
                  (loop for round in rounds
                        sum (let* ((them (car round))
                                   (us (cdr round))
