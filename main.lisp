@@ -222,11 +222,215 @@
                  (get-answer-string crates))))
       (cons (part1) (part2)))))
 
+(defun day06 ()
+  (let ((input (first (read-input-file "day06.txt"))))
+    (labels ((all-unique? (str)
+               (let ((str (sort str #'char<)))
+                 (loop for c across str
+                       for i from 1 below (length str)
+                       when (char= c (char str i))
+                         do (return nil)
+                       finally (return t))))
+             (find-first-unique-substring (n string)
+               (loop for i from n to (length string)
+                     do (let ((substring (str:substring (- i n) i string)))
+                          (when (all-unique? substring) (return i)))))
+             (part1 () (find-first-unique-substring 4 input))
+             (part2 () (find-first-unique-substring 14 input)))
+      (cons (part1) (part2)))))
+
+(defclass dir ()
+  ((name :initarg :name :initform "" :accessor dir-name)
+   (children :initarg :children :initform nil :accessor dir-children)
+   (parent :initarg :parent :initform nil :accessor dir-parent)
+   (files :initform nil :accessor dir-files)
+   (size :initform 0 :accessor dir-size)))
+
+(defun make-dir (&key name children parent)
+  (make-instance 'dir :name name :children children :parent parent))
+
+(defun day07 ()
+  (let* ((input (read-input-file "day07.txt"))
+         (parsed-commands
+           (loop :for command :in input
+                 :with temp := nil
+                 :with parsed-commands := nil
+                 :do (if (char= #\$ (char command 0))
+                         (let ((command (rest (str:split #\Space command))))
+                           (when temp
+                             (push (nreverse temp) (car parsed-commands))
+                             (setf (car parsed-commands) (nreverse (car parsed-commands)))
+                             (setf temp nil))
+                           (push command parsed-commands))
+                         (push (str:split #\Space command) temp))
+                 :finally (return (nreverse parsed-commands))))
+         (dir-tree
+           (loop :for command :in parsed-commands
+                 :with root := (make-dir :name "/" :children nil :parent nil)
+                 :with cwd := root
+                 :do (str:string-case (first command)
+                       ("ls" (loop :for output :in (second command)
+                                   :do (unless (string= "dir" (first output))
+                                         (push (cons (second output) (first output))
+                                               (dir-files cwd)))))
+                       ("cd" (let ((target (second command)))
+                               (str:string-case target
+                                 ("/" (setf cwd root))
+                                 (".." (setf cwd (dir-parent cwd)))
+                                 (:otherwise
+                                  (let ((target-dir
+                                          (first
+                                           (member target
+                                                   (dir-children cwd)
+                                                   :test
+                                                   (lambda (a b)
+                                                     (string= a (dir-name b)))))))
+                                    (when (null target-dir)
+                                      (setf target-dir
+                                            (make-dir :name target
+                                                      :children nil
+                                                      :parent cwd))
+                                      (push target-dir (dir-children cwd)))
+                                    (setf cwd target-dir)))))))
+                 :finally (return root))))
+    (labels
+        ((calculate-sizes (dir)
+           (let ((immediate-size (sum (mapcar #'(lambda (file) (parse-integer (cdr file)))
+                                              (dir-files dir))))
+                 (children-size (sum (mapcar #'calculate-sizes (dir-children dir)))))
+             (setf (dir-size dir) (+ immediate-size children-size))))
+         (find-dir-if (root test)
+           (let ((child-results
+                   (loop :for child :in (dir-children root)
+                         :append (find-dir-if child test))))
+             (if (funcall test root)
+                 (cons root child-results)
+                 child-results)))
+         (part1 ()
+           (calculate-sizes dir-tree)
+           (sum (mapcar #'dir-size
+                        (find-dir-if dir-tree
+                                     #'(lambda (dir) (<= (dir-size dir) 100000))))))
+         (part2 ()
+           (calculate-sizes dir-tree)
+           (let* ((total-space 70000000)
+                  (needed-free-space 30000000)
+                  (used-space (dir-size dir-tree))
+                  (unused-space (- total-space used-space))
+                  (space-to-clear (- needed-free-space unused-space))
+                  (candidate-dirs (find-dir-if dir-tree
+                                               #'(lambda (dir) (>= (dir-size dir) space-to-clear)))))
+             (dir-size (car (sort candidate-dirs
+                                  #'(lambda (dir-a dir-b)
+                                      (< (dir-size dir-a) (dir-size dir-b)))))))))
+      (cons (part1) (part2)))))
+
+(defclass tree ()
+  ((height :initarg :height :accessor tree-height :initform (error "no height"))
+   (visible? :initform nil :accessor tree-visible?)))
+
+(defun make-tree (height)
+  (make-instance 'tree :height height))
+
+(defmethod print-object ((obj tree) stream)
+  (print-unreadable-object (obj stream :type nil :identity nil)
+    (format stream "~a~a~a"
+            (if (tree-visible? obj) " " "(")
+            (tree-height obj)
+            (if (tree-visible? obj) " " ")"))))
+
+(defun day08 ()
+  (let* ((input (read-input-file "day08.txt"))
+         (trees (loop :for line :in input
+                      :collect (loop :for tree :across line
+                                     :collect (make-tree (digit-char-p tree))))))
+    (labels ((from-left? (tree row col)
+               (loop :for i :from 0 :below col
+                     :always (< (tree-height (nth i (nth row trees)))
+                                (tree-height tree))))
+             (from-right? (tree row col)
+               (loop :for i :from (1+ col) :below (length (first trees))
+                     :always (< (tree-height (nth i (nth row trees)))
+                                (tree-height tree))))
+             (from-top? (tree row col)
+               (loop :for i :from 0 :below row
+                     :always (< (tree-height (nth col (nth i trees)))
+                                (tree-height tree))))
+             (from-bottom? (tree row col)
+               (loop :for i :from (1+ row) :below (length trees)
+                     :always (< (tree-height (nth col (nth i trees)))
+                                (tree-height tree))))
+             (is-visible? (tree row col)
+               (or (from-left? tree row col)
+                   (from-right? tree row col)
+                   (from-top? tree row col)
+                   (from-bottom? tree row col)))
+             (count-visible (trees)
+               (loop :for line :in trees
+                     :sum (loop :for tree :in line
+                                :count (tree-visible? tree))))
+             (part1 ()
+               (loop :for line :in trees
+                     :for row :from 0
+                     :do (loop :for tree :in line
+                               :for col :from 0
+                               :do (setf (tree-visible? tree)
+                                         (is-visible? tree row col))))
+               (count-visible trees))
+             (to-left (tree row col)
+               (loop :for i :from (1- col) :downto 0
+                     :with score := 0
+                     :do (incf score)
+                     :when (>= (tree-height (nth i (nth row trees)))
+                               (tree-height tree))
+                       :do (loop-finish)
+                     :finally (return score)))
+             (to-right (tree row col)
+               (loop :for i :from (1+ col) :below (length (first trees))
+                     :with score := 0
+                     :do (incf score)
+                     :when (>= (tree-height (nth i (nth row trees)))
+                               (tree-height tree))
+                       :do (loop-finish)
+                     :finally (return score)))
+             (to-top (tree row col)
+               (loop :for i :from (1- row) :downto 0
+                     :with score := 0
+                     :do (incf score)
+                     :when (>= (tree-height (nth col (nth i trees)))
+                               (tree-height tree))
+                       :do (loop-finish)
+                     :finally (return score)))
+             (to-bottom (tree row col)
+               (loop :for i :from (1+ row) :below (length trees)
+                     :with score := 0
+                     :do (incf score)
+                     :when (>= (tree-height (nth col (nth i trees)))
+                               (tree-height tree))
+                       :do (loop-finish)
+                     :finally (return score)))
+             (calculate-score (tree row col)
+               (* (to-left tree row col)
+                  (to-right tree row col)
+                  (to-top tree row col)
+                  (to-bottom tree row col)))
+             (part2 ()
+               (loop :for line :in trees
+                     :for row from 0
+                     :maximize (loop :for tree :in line
+                                     :for col :from 0
+                                     :maximize (calculate-score tree row col)))))
+      (cons (part1) (part2)))))
+
 (defun main ()
-  (format t "Day 01: ~a~%" (day01))
-  (format t "Day 02: ~a~%" (day02))
-  (format t "Day 03: ~a~%" (day03))
-  (format t "Day 04: ~a~%" (day04))
-  (format t "Day 05: ~a~%" (day05)))
+  (format t "~&Day 01: ~a" (day01))
+  (format t "~&Day 02: ~a" (day02))
+  (format t "~&Day 03: ~a" (day03))
+  (format t "~&Day 04: ~a" (day04))
+  (format t "~&Day 05: ~a" (day05))
+  (format t "~&Day 06: ~a" (day06))
+  (let ((*print-circle* t))
+    (format t "~&Day 07: ~a" (day07)))
+  (format t "~&Day 08: ~a" (day08)))
 
 (main)
